@@ -43,7 +43,6 @@ WINDOW_TITLE = "Ebonhold HD Patcher"
 APP_VERSION = "1.0.0"
 BUG_REPORTS_URL = "https://github.com/SypherRed/eh-patcher/issues"
 DEFAULT_SEARCH_TARGET_NAME = "ebonhold"
-SEARCH_ROOT_NAMES = ("Games", "Spiele", "Program Files", "Program Files (x86)")
 DOWNLOAD_TIMEOUT_SECONDS = 20
 DOWNLOAD_CHUNK_SIZE = 1024 * 512
 GITHUB_API_TIMEOUT_SECONDS = 20
@@ -53,6 +52,7 @@ GROUP_TOGGLE_GUTTER = 28
 PATCH_BASE_INDENT = 56
 PATCH_CHILD_INDENT = 24
 IMAGE_FILE_LARGE_ADDRESS_AWARE = 0x20
+SEARCH_STATUS_INTERVAL = 150
 
 
 @dataclass
@@ -783,23 +783,20 @@ class PatcherApp:
         self.root.after(150, self.process_queue)
 
     def get_search_roots(self) -> list[Path]:
-        roots = []
-        for drive in self.list_available_drives():
-            if (drive / DEFAULT_SEARCH_TARGET_NAME).exists():
-                roots.append(drive)
-                continue
-            preferred = [drive / name for name in SEARCH_ROOT_NAMES if (drive / name).exists()]
-            roots.extend(preferred or [drive])
-        return roots
+        return self.list_available_drives()
 
     def list_available_drives(self) -> list[Path]:
         return [Path(f"{letter}:\\") for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ" if Path(f"{letter}:\\").exists()]
 
     def scan_for_target(self, root: Path) -> list[Path]:
         matches = []
+        visited = 0
         for current_root, dirnames, _ in os.walk(root, topdown=True):
             dirnames[:] = [name for name in dirnames if not self.should_skip_directory(name)]
             current_path = Path(current_root)
+            visited += 1
+            if visited == 1 or visited % SEARCH_STATUS_INTERVAL == 0:
+                self.queue.put(("status", self.tr("search_at", root=root, current=current_path)))
             if current_path.name.lower() == DEFAULT_SEARCH_TARGET_NAME:
                 matches.append(current_path)
                 if len(matches) >= 5:
