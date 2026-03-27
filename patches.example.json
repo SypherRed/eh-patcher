@@ -1,0 +1,135 @@
+{
+  "app_update": {
+    "github_repo": "your-org/eh-patcher",
+    "current_version": "1.0.0",
+    "asset_name": "eh-patcher.exe"
+  },
+  "patches": [
+    {
+      "id": "visual-pack",
+      "name": "Visual Pack",
+      "description": "Select the full group to install every visual patch, or select only specific items below.",
+      "items": [
+        {
+          "id": "hd-textures",
+          "name": "HD Textures",
+          "description": "Installs the high-resolution textures into the Data folder.",
+          "target_subdirectories": [
+            "Data"
+          ],
+          "expected_files": [
+            "Data\\texture-pack.MPQ"
+          ],
+          "sources": [
+            {
+              "label": "Primary Storage",
+              "url": "https://example.com/ebonhold/hd-textures.rar"
+            },
+            {
+              "label": "Mirror Storage",
+              "url": "https://mirror.example.com/ebonhold/hd-textures.rar"
+            }
+          ]
+        },
+        {
+          "id": "enus-localization",
+          "name": "enUS Localization",
+          "description": "Installs language-specific files into Data\\enUS.",
+          "requires": "hd-textures",
+          "target_subdirectories": [
+            "Data\\enUS"
+          ],
+          "expected_files": [
+            "Data\\enUS\\locale-enUS.MPQ"
+          ],
+          "sources": [
+            {
+              "label": "Primary Storage",
+              "url": "https://example.com/ebonhold/enus-localization.rar"
+            },
+            {
+              "label": "Mirror Storage",
+              "url": "https://mirror.example.com/ebonhold/enus-localization.rar"
+            }
+          ]
+        },
+        {
+          "id": "enus-localization-addon",
+          "name": "enUS Localization Optional AddOn",
+          "description": "Installs an optional extra file set that depends on the base enUS Localization patch.",
+          "requires": "enus-localization",
+          "target_subdirectories": [
+            "Data\\enUS"
+          ],
+          "expected_files": [
+            "Data\\enUS\\locale-enUS-addon.MPQ"
+          ],
+          "sources": [
+            {
+              "label": "Primary Storage",
+              "url": "https://example.com/ebonhold/enus-localization-addon.rar"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "interface-pack",
+      "name": "Interface Pack",
+      "description": "Select the full group to install all interface patches, or only the items you want.",
+      "items": [
+        {
+          "id": "addon-pack",
+          "name": "AddOn Pack",
+          "description": "Installs UI AddOns into the Interface\\AddOns folder.",
+          "target_subdirectories": [
+            "Interface\\AddOns"
+          ],
+          "expected_files": [
+            "Interface\\AddOns\\MyAddon\\MyAddon.toc"
+          ],
+          "sources": [
+            {
+              "label": "Primary Storage",
+              "url": "https://example.com/ebonhold/addon-pack.rar"
+            },
+            {
+              "label": "Mirror Storage",
+              "url": "https://mirror.example.com/ebonhold/addon-pack.rar"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "shared-assets",
+      "name": "Shared Assets",
+      "description": "Installs files into multiple Ebonhold subfolders in one step.",
+      "target_subdirectories": [
+        "Data",
+        "Interface\\AddOns"
+      ],
+      "expected_files": [
+        "Data\\shared-assets.MPQ",
+        "Interface\\AddOns\\SharedAssets\\SharedAssets.toc"
+      ],
+      "sources": [
+        {
+          "label": "Primary Storage",
+          "url": "https://example.com/ebonhold/shared-assets.rar"
+        },
+        {
+          "label": "Mirror Storage",
+          "url": "https://mirror.example.com/ebonhold/shared-assets.rar"
+        }
+      ]
+    },
+    {
+      "id": "client-4gb",
+      "name": "4 GB Client Flag",
+      "description": "Sets the Large Address Aware flag on the game executable so a 32-bit client can use up to 4 GB on 64-bit Windows.",
+      "patch_type": "large_address_aware",
+      "target_executable": "Ebonhold.exe"
+    }
+  ]
+}

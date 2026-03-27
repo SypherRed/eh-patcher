@@ -1,0 +1,10 @@
+patches.json
+settings.json
+patch_state.json
+.patcher-data/
+__pycache__/
+/build/
+/dist/
+tools/UnRAR.exe
+tools/license.txt
+*spec
