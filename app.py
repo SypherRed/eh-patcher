@@ -1,6 +1,7 @@
 ﻿import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -8,6 +9,7 @@ import threading
 import webbrowser
 import zipfile
 import ctypes
+from html import unescape
 from dataclasses import dataclass
 from pathlib import Path
 from queue import Empty, Queue
@@ -756,18 +758,18 @@ class PatcherApp:
                     self.progress_var.set(0)
                     self.status_var.set(self.tr("ready"))
                     release = payload
-                    messagebox.showinfo(self.tr("updates_t"), self.tr("updates_open_release"))
-                    webbrowser.open(release.get("html_url", f"https://github.com/{self.update_repo}/releases/latest"))
+                    messagebox.showerror(
+                        self.tr("updates_t"),
+                        self.tr("updates_asset_missing", asset=self.update_asset_name or Path(sys.executable).name, release=release.get("tag_name", "?")),
+                    )
                 elif kind == "update_ready":
-                    release = payload["release"]
                     download_path = Path(payload["path"])
                     if self.apply_downloaded_update(download_path):
                         return
                     self.is_busy = False
                     self.progress_var.set(0)
                     self.status_var.set(self.tr("ready"))
-                    messagebox.showinfo(self.tr("updates_t"), self.tr("updates_open_release"))
-                    webbrowser.open(release.get("html_url", f"https://github.com/{self.update_repo}/releases/latest"))
+                    messagebox.showerror(self.tr("updates_t"), self.tr("updates_auto_only"))
                 elif kind == "update_error":
                     self.is_busy = False
                     self.progress_var.set(0)
@@ -809,9 +811,38 @@ class PatcherApp:
     def pick_working_source(self, patch: PatchDefinition) -> PatchSource | None:
         for source in patch.sources:
             self.queue.put(("status", self.tr("check_source", name=patch.name)))
-            if self.check_url_available(source.url):
-                return source
+            try:
+                resolved_url = self.resolve_download_url(source.url)
+            except Exception:
+                continue
+            if self.check_url_available(resolved_url):
+                return PatchSource(source.label, resolved_url)
         return None
+
+    def resolve_download_url(self, url: str) -> str:
+        parsed = urlparse(url)
+        hostname = (parsed.hostname or "").lower()
+        if hostname.endswith("mediafire.com") and "/file/" in parsed.path:
+            return self.resolve_mediafire_download_url(url)
+        return url
+
+    def resolve_mediafire_download_url(self, url: str) -> str:
+        with urlopen(Request(url, headers={"User-Agent": "eh-patcher/1.0"}), timeout=DOWNLOAD_TIMEOUT_SECONDS) as response:
+            content_type = response.headers.get("Content-Type", "")
+            if "text/html" not in content_type.lower():
+                return response.geturl() or url
+            html = response.read().decode("utf-8", errors="replace")
+
+        patterns = [
+            r'href="(https://download[^"]+)"',
+            r'id="downloadButton"[^>]*href="([^"]+)"',
+            r'aria-label="Download file"[^>]*href="([^"]+)"',
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, html, flags=re.IGNORECASE)
+            if match:
+                return unescape(match.group(1))
+        raise RuntimeError(f"Could not resolve MediaFire download link from {url}")
 
     def check_url_available(self, url: str) -> bool:
         try:
