@@ -7,13 +7,33 @@
   "patches": [
     {
       "id": "visual-pack",
-      "name": "Visual Pack",
-      "description": "Select the full group to install every visual patch, or select only specific items below.",
+      "name": {
+        "en": "Visual Pack",
+        "de": "Grafikpaket",
+        "es": "Paquete visual",
+        "it": "Pacchetto grafico"
+      },
+      "description": {
+        "en": "Select the full group to install every visual patch, or select only specific items below.",
+        "de": "Wähle die ganze Gruppe, um alle Grafik-Patches zu installieren, oder nur die gewünschten Einträge.",
+        "es": "Selecciona el grupo completo para instalar todos los parches visuales o solo los elementos deseados.",
+        "it": "Seleziona l'intero gruppo per installare tutte le patch grafiche oppure solo gli elementi desiderati."
+      },
       "items": [
         {
           "id": "hd-textures",
-          "name": "HD Textures",
-          "description": "Installs the high-resolution textures into the Data folder.",
+          "name": {
+            "en": "HD Textures",
+            "de": "HD-Texturen",
+            "es": "Texturas HD",
+            "it": "Texture HD"
+          },
+          "description": {
+            "en": "Installs the high-resolution textures into the Data folder.",
+            "de": "Installiert die hochauflösenden Texturen im Ordner Data.",
+            "es": "Instala las texturas de alta resolución en la carpeta Data.",
+            "it": "Installa le texture ad alta risoluzione nella cartella Data."
+          },
           "target_subdirectories": [
             "Data"
           ],

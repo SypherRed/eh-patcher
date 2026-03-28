@@ -66,8 +66,8 @@ class PatchSource:
 @dataclass
 class PatchDefinition:
     id: str
-    name: str
-    description: str
+    name: dict[str, str]
+    description: dict[str, str]
     patch_type: str
     target_subdirectories: list[str]
     expected_files: list[str]
@@ -79,8 +79,8 @@ class PatchDefinition:
 @dataclass
 class PatchGroup:
     id: str
-    name: str
-    description: str
+    name: dict[str, str]
+    description: dict[str, str]
     items: list[PatchDefinition]
 
 
@@ -106,6 +106,8 @@ class PatcherApp:
         self.group_expanded: dict[str, tk.BooleanVar] = {}
         self.group_item_frames: dict[str, ttk.Frame] = {}
         self.group_toggle_buttons: dict[str, ttk.Button] = {}
+        self.group_checkbuttons: dict[str, ttk.Checkbutton] = {}
+        self.group_description_labels: dict[str, tuple[PatchGroup, ttk.Label]] = {}
         self.patch_vars: list[tuple[PatchDefinition, tk.BooleanVar]] = []
         self.patch_var_map: dict[str, tk.BooleanVar] = {}
         self.patch_group_map: dict[str, str | None] = {}
@@ -187,8 +189,8 @@ class PatcherApp:
             if "items" in entry:
                 items = [self.parse_patch(item) for item in entry.get("items", [])]
                 if not items:
-                    raise ValueError(self.tr("cfg_group_empty", name=entry.get("name", entry.get("id", "?"))))
-                groups.append(PatchGroup(entry["id"], entry["name"], entry.get("description", ""), items))
+                    raise ValueError(self.tr("cfg_group_empty", name=self.config_label(entry)))
+                groups.append(PatchGroup(entry["id"], self.parse_localized_text(entry.get("name", entry["id"])), self.parse_localized_text(entry.get("description", "")), items))
             else:
                 standalone.append(self.parse_patch(entry))
         if not groups and not standalone:
@@ -201,13 +203,13 @@ class PatcherApp:
         sources = [PatchSource(src.get("label", f"Mirror {index + 1}"), src["url"]) for index, src in enumerate(patch.get("sources", []))]
         if patch_type in {"large_address_aware", "laa"}:
             if not target_executable:
-                raise ValueError(self.tr("cfg_exe", name=patch.get("name", patch.get("id", "?"))))
+                raise ValueError(self.tr("cfg_exe", name=self.config_label(patch)))
         elif not sources:
-            raise ValueError(self.tr("cfg_src", name=patch.get("name", patch.get("id", "?"))))
+            raise ValueError(self.tr("cfg_src", name=self.config_label(patch)))
         return PatchDefinition(
             id=patch["id"],
-            name=patch["name"],
-            description=patch.get("description", ""),
+            name=self.parse_localized_text(patch.get("name", patch["id"])),
+            description=self.parse_localized_text(patch.get("description", "")),
             patch_type=patch_type,
             target_subdirectories=self.normalize_target_subdirectories(patch),
             expected_files=self.normalize_expected_files(patch),
@@ -215,6 +217,20 @@ class PatcherApp:
             target_executable=target_executable,
             sources=sources,
         )
+
+    def config_label(self, payload: dict) -> str:
+        return self.localize_text(self.parse_localized_text(payload.get("name", payload.get("id", "?"))), fallback=payload.get("id", "?"))
+
+    def parse_localized_text(self, value: object) -> dict[str, str]:
+        if isinstance(value, dict):
+            parsed = {str(key): str(text) for key, text in value.items() if str(text).strip()}
+            if parsed:
+                return parsed
+        text = str(value).strip()
+        return {DEFAULT_LANGUAGE: text} if text else {}
+
+    def localize_text(self, values: dict[str, str], fallback: str = "") -> str:
+        return values.get(self.lang) or values.get(DEFAULT_LANGUAGE) or next(iter(values.values()), fallback)
 
     def normalize_relative_path(self, value: object) -> str:
         return str(value).replace("/", "\\").strip("\\ ").strip()
@@ -328,10 +344,14 @@ class PatcherApp:
         toggle = ttk.Button(gutter, text=self.group_toggle_text(group.id), width=2, command=lambda gid=group.id: self.toggle_group_visibility(gid))
         toggle.grid(row=0, column=0, sticky="w")
         self.group_toggle_buttons[group.id] = toggle
-        ttk.Checkbutton(header, text=group.name, variable=self.group_vars[group.id], command=lambda gid=group.id: self.on_group_toggled(gid)).grid(row=0, column=1, sticky="w")
+        group_check = ttk.Checkbutton(header, text=self.group_name(group), variable=self.group_vars[group.id], command=lambda gid=group.id: self.on_group_toggled(gid))
+        group_check.grid(row=0, column=1, sticky="w")
+        self.group_checkbuttons[group.id] = group_check
 
         if group.description:
-            ttk.Label(wrapper, text=group.description, foreground="#555555", wraplength=820, justify="left").pack(anchor="w", padx=(GROUP_TOGGLE_GUTTER, 0), pady=(2, 6))
+            description_label = ttk.Label(wrapper, text=self.group_description(group), foreground="#555555", wraplength=820, justify="left")
+            description_label.pack(anchor="w", padx=(GROUP_TOGGLE_GUTTER, 0), pady=(2, 6))
+            self.group_description_labels[group.id] = (group, description_label)
 
         items_frame = ttk.Frame(wrapper)
         items_frame.pack(fill="x", expand=True)
@@ -432,8 +452,21 @@ class PatcherApp:
             current = self.patch_requires.get(current)
         return PATCH_BASE_INDENT + (depth * PATCH_CHILD_INDENT)
 
+    def patch_name(self, patch: PatchDefinition) -> str:
+        return self.localize_text(patch.name, fallback=patch.id)
+
+    def patch_description(self, patch: PatchDefinition) -> str:
+        return self.localize_text(patch.description, fallback="")
+
+    def group_name(self, group: PatchGroup) -> str:
+        return self.localize_text(group.name, fallback=group.id)
+
+    def group_description(self, group: PatchGroup) -> str:
+        return self.localize_text(group.description, fallback="")
+
     def patch_button_label(self, patch: PatchDefinition) -> str:
-        return f"+ {patch.name}" if patch.requires else patch.name
+        patch_name = self.patch_name(patch)
+        return f"+ {patch_name}" if patch.requires else patch_name
 
     def toggle_group_visibility(self, group_id: str) -> None:
         expanded = not self.group_expanded[group_id].get()
@@ -470,6 +503,15 @@ class PatcherApp:
         if self.install_tool_path:
             extractor_state = self.tr("extractor_with_external", name=Path(self.install_tool_path).name)
         self.widgets["extractor"].configure(text=extractor_state)
+        for group_id, checkbutton in self.group_checkbuttons.items():
+            group = next((candidate for candidate in self.groups if candidate.id == group_id), None)
+            if group:
+                checkbutton.configure(text=self.group_name(group))
+        for group_id, (group, label) in self.group_description_labels.items():
+            description = self.group_description(group)
+            if description:
+                label.configure(text=description)
+        self.refresh_patch_statuses()
 
     def open_info_window(self) -> None:
         window = tk.Toplevel(self.root)
@@ -516,7 +558,7 @@ class PatcherApp:
         return f"{base_name} \u2713" if active else base_name
 
     def patch_detail_text(self, patch: PatchDefinition, active: bool) -> str:
-        return patch.description or self.tr("nodesc")
+        return self.patch_description(patch) or self.tr("nodesc")
 
     def choose_target_path(self) -> None:
         path = filedialog.askdirectory(title=self.tr("choose_title"))

@@ -1,6 +1,6 @@
 # eh-patcher
-
-Windows patcher for Ebonhold.
+![Banner](icon.png)
+A Patcher for Project Ebonhold allowing Users to modify/patch their game with visuals and QoL patches/addons.
 
 ## Features
 
