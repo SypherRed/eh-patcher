@@ -94,6 +94,77 @@
       ]
     },
     {
+      "id": "qol-pack",
+      "name": {
+        "en": "Quality of Life Pack"
+      },
+      "description": {
+        "en": "Selecting this entry can automatically include related optional patches."
+      },
+      "items": [
+        {
+          "id": "map-base",
+          "name": {
+            "en": "Map Base"
+          },
+          "description": {
+            "en": "Installs the main map patch and automatically selects the related addons below."
+          },
+          "selects": [
+            "map-addon-a",
+            "map-addon-b"
+          ],
+          "target_subdirectories": [
+            "Data\\enUS"
+          ],
+          "sources": [
+            {
+              "label": "Primary Storage",
+              "url": "https://example.com/ebonhold/map-base.rar"
+            }
+          ]
+        },
+        {
+          "id": "map-addon-a",
+          "name": {
+            "en": "Map Addon A"
+          },
+          "description": {
+            "en": "Depends on the main map patch."
+          },
+          "requires": "map-base",
+          "target_subdirectories": [
+            "Interface\\AddOns"
+          ],
+          "sources": [
+            {
+              "label": "Primary Storage",
+              "url": "https://example.com/ebonhold/map-addon-a.zip"
+            }
+          ]
+        },
+        {
+          "id": "map-addon-b",
+          "name": {
+            "en": "Map Addon B"
+          },
+          "description": {
+            "en": "Depends on the main map patch."
+          },
+          "requires": "map-base",
+          "target_subdirectories": [
+            "Interface\\AddOns"
+          ],
+          "sources": [
+            {
+              "label": "Primary Storage",
+              "url": "https://example.com/ebonhold/map-addon-b.zip"
+            }
+          ]
+        }
+      ]
+    },
+    {
       "id": "interface-pack",
       "name": "Interface Pack",
       "description": "Select the full group to install all interface patches, or only the items you want.",

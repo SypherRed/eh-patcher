@@ -38,6 +38,7 @@ SETTINGS_PATH = USER_DATA_DIR / "settings.json"
 PATCH_STATE_PATH = USER_DATA_DIR / "patch_state.json"
 PATCH_DATA_DIR = USER_DATA_DIR / ".patcher-data"
 PATCH_BACKUPS_DIR = PATCH_DATA_DIR / "backups"
+PATCH_DOWNLOAD_CACHE_DIR = PATCH_DATA_DIR / "downloads"
 ICON_PATH = RESOURCE_DIR / "icon.png"
 APP_ICON_PATH = RESOURCE_DIR / "icon-app.png"
 ICON_ICO_PATH = RESOURCE_DIR / "icon.ico"
@@ -72,6 +73,7 @@ class PatchDefinition:
     target_subdirectories: list[str]
     expected_files: list[str]
     requires: str | None
+    selects: list[str]
     target_executable: str | None
     sources: list[PatchSource]
 
@@ -112,6 +114,7 @@ class PatcherApp:
         self.patch_var_map: dict[str, tk.BooleanVar] = {}
         self.patch_group_map: dict[str, str | None] = {}
         self.patch_requires: dict[str, str | None] = {}
+        self.patch_selects: dict[str, list[str]] = {}
         self.patch_dependents: dict[str, list[str]] = {}
         self.patch_buttons: dict[str, ttk.Checkbutton] = {}
         self.patch_detail_labels: dict[str, tuple[PatchDefinition, ttk.Label]] = {}
@@ -214,6 +217,7 @@ class PatcherApp:
             target_subdirectories=self.normalize_target_subdirectories(patch),
             expected_files=self.normalize_expected_files(patch),
             requires=patch.get("requires"),
+            selects=self.normalize_patch_links(patch.get("selects")),
             target_executable=target_executable,
             sources=sources,
         )
@@ -251,6 +255,17 @@ class PatcherApp:
         cleaned = []
         for value in values:
             text = self.normalize_relative_path(value)
+            if text:
+                cleaned.append(text)
+        return cleaned
+
+    def normalize_patch_links(self, value: object) -> list[str]:
+        if value is None:
+            return []
+        values = value if isinstance(value, list) else [value]
+        cleaned = []
+        for entry in values:
+            text = str(entry).strip()
             if text:
                 cleaned.append(text)
         return cleaned
@@ -365,6 +380,7 @@ class PatcherApp:
         self.patch_var_map[patch.id] = var
         self.patch_group_map[patch.id] = group_id
         self.patch_requires[patch.id] = patch.requires
+        self.patch_selects[patch.id] = patch.selects
         if patch.requires:
             self.patch_dependents.setdefault(patch.requires, []).append(patch.id)
         if group_id:
@@ -405,6 +421,7 @@ class PatcherApp:
         var = self.patch_var_map[patch_id]
         if var.get():
             self.select_required_chain(patch_id)
+            self.select_selected_chain(patch_id)
         else:
             self.deselect_dependents(patch_id)
 
@@ -424,6 +441,32 @@ class PatcherApp:
             if group_id:
                 self.group_vars[group_id].set(all(var.get() for _, var in self.group_children[group_id]))
             current = self.patch_requires.get(current)
+        self.updating_group_state = False
+
+    def select_selected_chain(self, patch_id: str) -> None:
+        self.updating_group_state = True
+        pending = list(self.patch_selects.get(patch_id, []))
+        seen: set[str] = set()
+        while pending:
+            selected_id = pending.pop()
+            if selected_id in seen or selected_id not in self.patch_var_map:
+                continue
+            seen.add(selected_id)
+            self.patch_var_map[selected_id].set(True)
+            current = self.patch_requires.get(selected_id)
+            while current:
+                if current in self.patch_var_map:
+                    self.patch_var_map[current].set(True)
+                    group_id = self.patch_group_map.get(current)
+                    if group_id:
+                        self.group_vars[group_id].set(all(var.get() for _, var in self.group_children[group_id]))
+                current = self.patch_requires.get(current)
+            group_id = self.patch_group_map.get(selected_id)
+            if group_id:
+                self.group_vars[group_id].set(all(var.get() for _, var in self.group_children[group_id]))
+            pending.extend(self.patch_selects.get(selected_id, []))
+        for group_id in self.group_children:
+            self.group_vars[group_id].set(all(var.get() for _, var in self.group_children[group_id]))
         self.updating_group_state = False
 
     def deselect_dependents(self, patch_id: str) -> None:
@@ -667,35 +710,65 @@ class PatcherApp:
                 for index, patch in enumerate(selected, start=1):
                     patch_start = ((index - 1) / total) * 100
                     patch_end = (index / total) * 100
+                    patch_label = self.patch_name(patch)
                     self.queue.put(("progress", patch_start))
                     if patch.patch_type in {"large_address_aware", "laa"}:
-                        self.queue.put(("status", self.tr("apply_status", i=index, n=total, name=patch.name)))
+                        self.queue.put(("status", self.tr("apply_status", i=index, n=total, name=patch_label)))
                         record = self.apply_large_address_aware_patch(patch, target_root)
                         self.queue.put(("progress", patch_end))
                     else:
-                        self.queue.put(("status", self.tr("check", i=index, n=total, name=patch.name)))
+                        self.queue.put(("status", self.tr("check", i=index, n=total, name=patch_label)))
                         self.set_patch_stage_progress(patch_start, patch_end, 0.08)
                         source = self.pick_working_source(patch)
                         if source is None:
-                            raise RuntimeError(self.tr("no_source", name=patch.name))
+                            raise RuntimeError(self.tr("no_source", name=patch_label))
 
-                        archive_path = temp_root / self.filename_from_url(source.url, patch.id)
+                        archive_name = self.filename_from_url(source.url, patch.id)
+                        archive_path = self.cached_download_path(source.url, archive_name)
                         stage_dir = temp_root / f"{patch.id}-stage"
                         stage_dir.mkdir(parents=True, exist_ok=True)
-                        self.queue.put(("status", self.tr("download", i=index, n=total, name=patch.name)))
-                        self.download_file(
-                            source.url,
-                            archive_path,
-                            progress_callback=lambda fraction, ps=patch_start, pe=patch_end: self.set_patch_stage_progress(ps, pe, 0.08 + (fraction * 0.70)),
-                            status_callback=lambda downloaded, total_size, i=index, n=total, name=patch.name: self.queue.put((
-                                "status",
-                                f"{self.tr('download', i=i, n=n, name=name)} ({self.format_size(downloaded)} / {self.format_size(total_size)})",
-                            )) if total_size else None,
-                        )
-                        self.queue.put(("status", self.tr("extract_archive", i=index, n=total, name=patch.name)))
+                        used_cached_archive = archive_path.exists() and archive_path.is_file()
+                        if used_cached_archive:
+                            self.queue.put(("status", self.tr("using_cached_patch", i=index, n=total, name=patch_label)))
+                            self.set_patch_stage_progress(patch_start, patch_end, 0.78)
+                        else:
+                            self.queue.put(("status", self.tr("download", i=index, n=total, name=patch_label)))
+                            self.download_file(
+                                source.url,
+                                archive_path,
+                                progress_callback=lambda fraction, ps=patch_start, pe=patch_end: self.set_patch_stage_progress(ps, pe, 0.08 + (fraction * 0.70)),
+                                status_callback=lambda downloaded, total_size, i=index, n=total, name=patch_label: self.queue.put((
+                                    "status",
+                                    f"{self.tr('download', i=i, n=n, name=name)} ({self.format_size(downloaded)} / {self.format_size(total_size)})",
+                                )) if total_size else None,
+                            )
+                        self.queue.put(("status", self.tr("extract_archive", i=index, n=total, name=patch_label)))
                         self.set_patch_stage_progress(patch_start, patch_end, 0.82)
-                        self.extract_archive_to_directory(archive_path, stage_dir)
-                        self.queue.put(("status", self.tr("apply_status", i=index, n=total, name=patch.name)))
+                        try:
+                            self.extract_archive_to_directory(archive_path, stage_dir)
+                        except Exception:
+                            if not used_cached_archive:
+                                raise
+                            if stage_dir.exists():
+                                shutil.rmtree(stage_dir, ignore_errors=True)
+                            stage_dir.mkdir(parents=True, exist_ok=True)
+                            try:
+                                archive_path.unlink()
+                            except OSError:
+                                pass
+                            self.queue.put(("status", self.tr("download", i=index, n=total, name=patch_label)))
+                            self.download_file(
+                                source.url,
+                                archive_path,
+                                progress_callback=lambda fraction, ps=patch_start, pe=patch_end: self.set_patch_stage_progress(ps, pe, 0.08 + (fraction * 0.70)),
+                                status_callback=lambda downloaded, total_size, i=index, n=total, name=patch_label: self.queue.put((
+                                    "status",
+                                    f"{self.tr('download', i=i, n=n, name=name)} ({self.format_size(downloaded)} / {self.format_size(total_size)})",
+                                )) if total_size else None,
+                            )
+                            self.queue.put(("status", self.tr("extract_archive", i=index, n=total, name=patch_label)))
+                            self.extract_archive_to_directory(archive_path, stage_dir)
+                        self.queue.put(("status", self.tr("apply_status", i=index, n=total, name=patch_label)))
                         self.set_patch_stage_progress(patch_start, patch_end, 0.92)
                         record = self.apply_staged_patch(patch, stage_dir, target_root)
                         self.queue.put(("progress", patch_end))
@@ -741,7 +814,7 @@ class PatcherApp:
             total = len(selected)
             for index, patch in enumerate(selected, start=1):
                 self.queue.put(("progress", ((index - 1) / total) * 100))
-                self.queue.put(("status", self.tr("uninstall_status", i=index, n=total, name=patch.name)))
+                self.queue.put(("status", self.tr("uninstall_status", i=index, n=total, name=self.patch_name(patch))))
                 self.uninstall_patch_record(patch.id, target_root)
             self.queue.put(("progress", 100))
             self.queue.put(("done", self.tr("uninstall_done")))
@@ -852,7 +925,7 @@ class PatcherApp:
 
     def pick_working_source(self, patch: PatchDefinition) -> PatchSource | None:
         for source in patch.sources:
-            self.queue.put(("status", self.tr("check_source", name=patch.name)))
+            self.queue.put(("status", self.tr("check_source", name=self.patch_name(patch))))
             try:
                 resolved_url = self.resolve_download_url(source.url)
             except Exception:
@@ -927,6 +1000,11 @@ class PatcherApp:
                 return f"{value:.1f} {unit}"
             value /= 1024
         return f"{size_bytes} B"
+
+    def cached_download_path(self, url: str, filename: str) -> Path:
+        digest = hashlib.sha256(url.encode("utf-8")).hexdigest()[:16]
+        PATCH_DOWNLOAD_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        return PATCH_DOWNLOAD_CACHE_DIR / f"{digest}-{filename}"
 
     def normalize_version_text(self, value: str) -> str:
         normalized = value.strip()
@@ -1033,10 +1111,10 @@ class PatcherApp:
 
     def apply_large_address_aware_patch(self, patch: PatchDefinition, target_root: Path) -> dict:
         if not patch.target_executable:
-            raise RuntimeError(self.tr("cfg_exe", name=patch.name))
+            raise RuntimeError(self.tr("cfg_exe", name=self.patch_name(patch)))
         executable_path = target_root / Path(patch.target_executable)
         if not executable_path.exists():
-            raise RuntimeError(self.tr("exe_missing", name=patch.name, path=patch.target_executable))
+            raise RuntimeError(self.tr("exe_missing", name=self.patch_name(patch), path=patch.target_executable))
         if not executable_path.is_file():
             raise RuntimeError(self.tr("exe_invalid", path=patch.target_executable))
 
@@ -1072,7 +1150,7 @@ class PatcherApp:
         backup_root = PATCH_BACKUPS_DIR / install_id
         staged_files = [path for path in stage_dir.rglob("*") if path.is_file()]
         if not staged_files:
-            raise RuntimeError(self.tr("empty_archive", name=patch.name))
+            raise RuntimeError(self.tr("empty_archive", name=self.patch_name(patch)))
 
         records = []
         for target_subdirectory in patch.target_subdirectories:
