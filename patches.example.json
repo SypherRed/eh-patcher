@@ -173,6 +173,15 @@
           "id": "addon-pack",
           "name": "AddOn Pack",
           "description": "Installs UI AddOns into the Interface\\AddOns folder.",
+          "notice": {
+            "type": "compatibility",
+            "text": {
+              "en": "Not fully compatible with ElvUI.",
+              "de": "Nicht vollst\u00e4ndig mit ElvUI kompatibel.",
+              "es": "No es totalmente compatible con ElvUI.",
+              "it": "Non \u00e8 completamente compatibile con ElvUI."
+            }
+          },
           "target_subdirectories": [
             "Interface\\AddOns"
           ],

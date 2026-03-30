@@ -6,29 +6,36 @@ A Patcher for Project Ebonhold allowing Users to modify/patch their game with vi
 
 ## Features
 
-- grouped patch selection
-- optional dependent sub-patches
-- automatic target folder detection
-- install detection and uninstall support
+- grouped patch selection with optional dependencies and related patch selection
+- automatic Ebonhold folder search with remembered target path
+- install detection for active and manually present patches
+- per-patch uninstall support
 - support for direct file, `.zip`, and `.rar` patch sources
-- built-in GitHub release update check
-- English, German, Spanish, and Italian UI support
+- cached patch downloads for faster reinstallations
+- built-in GitHub update support for the published Windows executable
+- Large Address Aware / 4 GB client flag support
+- per-patch notices for compatibility and additional information
+- multilingual UI support
 
 ## Included Patches
 
 **Character Visuals**
 - HD Creatures & Mounts
-    - Optional: More HD Creatures & Mounts + Different Druid Forms 
 - HD Race & Class Models
-    - Optional: HD Armor & Weapons
-- HD Equipment
+- HD Armor, Weapons / Equipment
+- HD Spells & Effects `Not all are newly styled`
 
 **World Visuals**
 - HD Environment
 - HD Watertextures
-- HD Battlegrounds
+- HD Trees
+
+**Misc Visuals**
+- New Character Select/Creation Screen
+- Character Info and Spellbook `Not compatible with ElvUI`
 
 **QoL Improvements**
+- Extra Class & Race Combination (e.g. Night Elf Mage, Blood Elf Warrior...)
 - Classic & TBC Maps
 - Caverns & Mines Maps
     - Requires WDM & Astrolabe
@@ -41,11 +48,17 @@ Run locally:
 python app.py
 ```
 
+## Info
+This is a standalone .exe file; no installation is required.
+For a faster and smoother user experience, EHPatcher saves your game location and downloaded patches within `%LOCALAPPDATA%\EHPatcher`.
+
 ### Releases
 
 The application is distributed through GitHub.
 https://github.com/SypherRed/eh-patcher/releases
 
+
+#### Stuff
 *Preview Image*
 https://i.imgur.com/9bW2Xjq.png
 

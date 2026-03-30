@@ -69,6 +69,8 @@ class PatchDefinition:
     id: str
     name: dict[str, str]
     description: dict[str, str]
+    notice_kind: str | None
+    notice_text: dict[str, str]
     patch_type: str
     target_subdirectories: list[str]
     expected_files: list[str]
@@ -118,6 +120,7 @@ class PatcherApp:
         self.patch_dependents: dict[str, list[str]] = {}
         self.patch_buttons: dict[str, ttk.Checkbutton] = {}
         self.patch_detail_labels: dict[str, tuple[PatchDefinition, ttk.Label]] = {}
+        self.patch_notice_labels: dict[str, tuple[PatchDefinition, ttk.Label]] = {}
         self.patch_active_ids: set[str] = set()
 
         self.target_path_var = tk.StringVar(value=self.settings.get("last_target_path", ""))
@@ -213,6 +216,8 @@ class PatcherApp:
             id=patch["id"],
             name=self.parse_localized_text(patch.get("name", patch["id"])),
             description=self.parse_localized_text(patch.get("description", "")),
+            notice_kind=self.normalize_notice_kind(patch),
+            notice_text=self.parse_notice_text(patch),
             patch_type=patch_type,
             target_subdirectories=self.normalize_target_subdirectories(patch),
             expected_files=self.normalize_expected_files(patch),
@@ -258,6 +263,21 @@ class PatcherApp:
             if text:
                 cleaned.append(text)
         return cleaned
+
+    def normalize_notice_kind(self, patch: dict) -> str | None:
+        notice = patch.get("notice")
+        if isinstance(notice, dict):
+            kind = str(notice.get("type", "info")).strip().lower()
+            return kind or "info"
+        if patch.get("info") or patch.get("notice"):
+            return "info"
+        return None
+
+    def parse_notice_text(self, patch: dict) -> dict[str, str]:
+        notice = patch.get("notice")
+        if isinstance(notice, dict):
+            return self.parse_localized_text(notice.get("text", ""))
+        return self.parse_localized_text(patch.get("info", patch.get("notice", "")))
 
     def normalize_patch_links(self, value: object) -> list[str]:
         if value is None:
@@ -331,8 +351,6 @@ class PatcherApp:
         controls = ttk.Frame(frame)
         controls.grid(row=3, column=0, sticky="ew")
         controls.columnconfigure(0, weight=1)
-        self.widgets["extractor"] = ttk.Label(controls, foreground="#555555")
-        self.widgets["extractor"].grid(row=0, column=0, sticky="w")
         actions = ttk.Frame(controls)
         actions.grid(row=0, column=1, sticky="e")
         self.widgets["apply_btn"] = ttk.Button(actions, command=self.start_patch_install)
@@ -405,6 +423,9 @@ class PatcherApp:
         label = ttk.Label(content, foreground="#555555", wraplength=760, justify="left")
         label.pack(anchor="w", padx=(24, 0), pady=(2, 0))
         self.patch_detail_labels[patch.id] = (patch, label)
+        notice_label = ttk.Label(content, foreground="#9a6700", wraplength=760, justify="left")
+        notice_label.pack(anchor="w", padx=(24, 0), pady=(2, 0))
+        self.patch_notice_labels[patch.id] = (patch, notice_label)
 
     def on_group_toggled(self, group_id: str) -> None:
         if self.updating_group_state:
@@ -501,6 +522,24 @@ class PatcherApp:
     def patch_description(self, patch: PatchDefinition) -> str:
         return self.localize_text(patch.description, fallback="")
 
+    def patch_notice_text(self, patch: PatchDefinition) -> str:
+        return self.localize_text(patch.notice_text, fallback="")
+
+    def patch_notice_badge(self, patch: PatchDefinition) -> str:
+        kind = (patch.notice_kind or "info").lower()
+        mapping = {
+            "info": "patch_notice_info",
+            "warning": "patch_notice_warning",
+            "compatibility": "patch_notice_compatibility",
+        }
+        return self.tr(mapping.get(kind, "patch_notice_info"))
+
+    def patch_notice_display(self, patch: PatchDefinition) -> str:
+        text = self.patch_notice_text(patch)
+        if not text:
+            return ""
+        return f"{self.patch_notice_badge(patch)}: {text}"
+
     def group_name(self, group: PatchGroup) -> str:
         return self.localize_text(group.name, fallback=group.id)
 
@@ -542,10 +581,6 @@ class PatcherApp:
         self.widgets["patch_hint"].configure(text=self.tr("patch_hint"))
         self.widgets["apply_btn"].configure(text=self.tr("apply"))
         self.widgets["uninstall_btn"].configure(text=self.tr("uninstall"))
-        extractor_state = self.tr("zip_builtin")
-        if self.install_tool_path:
-            extractor_state = self.tr("extractor_with_external", name=Path(self.install_tool_path).name)
-        self.widgets["extractor"].configure(text=extractor_state)
         for group_id, checkbutton in self.group_checkbuttons.items():
             group = next((candidate for candidate in self.groups if candidate.id == group_id), None)
             if group:
@@ -554,6 +589,9 @@ class PatcherApp:
             description = self.group_description(group)
             if description:
                 label.configure(text=description)
+        for patch_id, (patch, label) in self.patch_notice_labels.items():
+            notice = self.patch_notice_display(patch)
+            label.configure(text=notice)
         self.refresh_patch_statuses()
 
     def open_info_window(self) -> None:
@@ -589,12 +627,18 @@ class PatcherApp:
         self.status_refresh_job = None
         target_root = self.current_target_root()
         self.patch_active_ids = set()
+        state_changed = False
         for patch, _ in self.patch_vars:
             active = bool(target_root and self.is_patch_active_for_target(patch.id, target_root))
+            if target_root:
+                state_changed = self.sync_patch_state_entry(patch, target_root, active) or state_changed
             if active:
                 self.patch_active_ids.add(patch.id)
             self.patch_buttons[patch.id].configure(text=self.patch_display_name(patch, active))
             self.patch_detail_labels[patch.id][1].configure(text=self.patch_detail_text(patch, active))
+            self.patch_notice_labels[patch.id][1].configure(text=self.patch_notice_display(patch))
+        if state_changed:
+            self.write_json(PATCH_STATE_PATH, self.patch_state)
 
     def patch_display_name(self, patch: PatchDefinition, active: bool) -> str:
         base_name = self.patch_button_label(patch)
@@ -602,6 +646,34 @@ class PatcherApp:
 
     def patch_detail_text(self, patch: PatchDefinition, active: bool) -> str:
         return self.patch_description(patch) or self.tr("nodesc")
+
+    def sync_patch_state_entry(self, patch: PatchDefinition, target_root: Path, active: bool) -> bool:
+        record = self.find_install_record(patch.id, target_root)
+        if active:
+            if record:
+                return False
+            detected_files = patch.expected_files or self.derive_detected_files(patch, target_root)
+            if not detected_files:
+                return False
+            self.patch_state.setdefault("installs", []).append({
+                "patch_id": patch.id,
+                "target_root": str(target_root),
+                "install_id": self.make_install_id(patch.id),
+                "patch_type": patch.patch_type,
+                "detected_only": True,
+                "files": [{"relative_path": relative_path, "backup_path": None, "sha256": None} for relative_path in detected_files],
+            })
+            return True
+        if record:
+            self.remove_install_record(patch.id, target_root)
+            return True
+        return False
+
+    def derive_detected_files(self, patch: PatchDefinition, target_root: Path) -> list[str]:
+        record = self.find_install_record(patch.id, target_root)
+        if not record:
+            return []
+        return [entry.get("relative_path") for entry in record.get("files", []) if entry.get("relative_path")]
 
     def choose_target_path(self) -> None:
         path = filedialog.askdirectory(title=self.tr("choose_title"))
