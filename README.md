@@ -64,5 +64,5 @@ https://i.imgur.com/9bW2Xjq.png
 
 
 **Virustotal**
-https://www.virustotal.com/gui/file/ca10207063c684fdbda182350b1b87cf036a6015e81d96ac107edbec452ab0a3/detection
+https://www.virustotal.com/gui/file/efc84c6ac0c9ac5940d2d4a20bf0215951259adb71de543bb78170ee78ae89c3/detection
 _Bkav Pro is known to falsely flag executables_
