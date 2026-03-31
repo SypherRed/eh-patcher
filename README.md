@@ -50,7 +50,7 @@ python app.py
 
 ## Info
 This is a standalone .exe file; no installation is required.
-For a faster and smoother user experience, EHPatcher saves your game location and downloaded patches within `%LOCALAPPDATA%\EHPatcher`.
+For a faster and smoother user experience, EH-Patcher saves your game location and downloaded patches within `%LOCALAPPDATA%\EH-Patcher`.
 
 ### Releases
 
