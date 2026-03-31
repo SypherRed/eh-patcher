@@ -27,7 +27,15 @@ from tkinter import filedialog, messagebox, ttk
 APP_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
 RESOURCE_DIR = Path(getattr(sys, "_MEIPASS", APP_DIR))
 BASE_DIR = APP_DIR
-USER_DATA_DIR = Path(os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA") or APP_DIR) / "EH Patcher"
+APP_STORAGE_NAME = "EH-Patcher"
+LEGACY_APP_STORAGE_NAME = "EH Patcher"
+USER_DATA_DIR = Path(os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA") or APP_DIR) / APP_STORAGE_NAME
+LEGACY_USER_DATA_DIR = Path(os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA") or APP_DIR) / LEGACY_APP_STORAGE_NAME
+if not USER_DATA_DIR.exists() and LEGACY_USER_DATA_DIR.exists():
+    try:
+        shutil.move(str(LEGACY_USER_DATA_DIR), str(USER_DATA_DIR))
+    except Exception:
+        pass
 CONFIG_PATH = USER_DATA_DIR / "patches.json"
 if not CONFIG_PATH.exists():
     CONFIG_PATH = APP_DIR / "patches.json"
@@ -1176,17 +1184,30 @@ class PatcherApp:
         with urlopen(Request(api_url, headers={"User-Agent": "eh-patcher/1.0"}), timeout=GITHUB_API_TIMEOUT_SECONDS) as response:
             return json.loads(response.read().decode("utf-8"))
 
+    def normalize_asset_name(self, value: str) -> str:
+        return re.sub(r"[\s._-]+", "", value).lower()
+
     def pick_update_asset(self, release: dict) -> dict | None:
         assets = release.get("assets", [])
         if not assets:
             return None
         if self.update_asset_name:
-            return next((asset for asset in assets if asset.get("name", "").lower() == self.update_asset_name.lower()), None)
+            normalized_target = self.normalize_asset_name(self.update_asset_name)
+            exact = next((asset for asset in assets if asset.get("name", "").lower() == self.update_asset_name.lower()), None)
+            if exact:
+                return exact
+            tolerant = next((asset for asset in assets if self.normalize_asset_name(asset.get("name", "")) == normalized_target), None)
+            if tolerant:
+                return tolerant
         current_name = Path(sys.executable).name.lower()
         if getattr(sys, "frozen", False):
             exact = next((asset for asset in assets if asset.get("name", "").lower() == current_name), None)
             if exact:
                 return exact
+            normalized_current = self.normalize_asset_name(current_name)
+            tolerant = next((asset for asset in assets if self.normalize_asset_name(asset.get("name", "")) == normalized_current), None)
+            if tolerant:
+                return tolerant
         return next((asset for asset in assets if asset.get("name", "").lower().endswith(".exe")), None)
 
     def apply_downloaded_update(self, download_path: Path) -> bool:
