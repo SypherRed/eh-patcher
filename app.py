@@ -6,9 +6,11 @@ import shutil
 import subprocess
 import sys
 import threading
+import traceback
 import webbrowser
 import zipfile
 import ctypes
+from datetime import datetime
 from html import unescape
 from dataclasses import dataclass
 from pathlib import Path
@@ -36,6 +38,7 @@ if not TRANSLATIONS_PATH.exists():
     TRANSLATIONS_PATH = RESOURCE_DIR / "translations.json"
 SETTINGS_PATH = USER_DATA_DIR / "settings.json"
 PATCH_STATE_PATH = USER_DATA_DIR / "patch_state.json"
+ERROR_LOG_PATH = USER_DATA_DIR / "patcher.log"
 PATCH_DATA_DIR = USER_DATA_DIR / ".patcher-data"
 PATCH_BACKUPS_DIR = PATCH_DATA_DIR / "backups"
 PATCH_DOWNLOAD_CACHE_DIR = PATCH_DATA_DIR / "downloads"
@@ -56,6 +59,23 @@ PATCH_BASE_INDENT = 56
 PATCH_CHILD_INDENT = 24
 IMAGE_FILE_LARGE_ADDRESS_AWARE = 0x20
 SEARCH_STATUS_INTERVAL = 150
+
+
+def sanitize_log_text(value: object) -> str:
+    return re.sub(r"https?://\S+", "[redacted-url]", str(value))
+
+
+def append_error_log(event: str, message: str, **context: object) -> None:
+    USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    lines = [
+        f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {event}",
+        f"message={sanitize_log_text(message)}",
+    ]
+    for key, value in context.items():
+        lines.append(f"{key}={sanitize_log_text(value)}")
+    lines.append("")
+    with ERROR_LOG_PATH.open("a", encoding="utf-8") as handle:
+        handle.write("\n".join(lines))
 
 
 @dataclass
@@ -140,6 +160,7 @@ class PatcherApp:
         self.root.after(150, self.process_queue)
         self.root.after(250, self.start_initial_search)
         self.root.after(300, self.refresh_patch_statuses)
+        self.root.after(1200, self.start_startup_update_check)
 
     def read_json(self, path: Path, default: dict) -> dict:
         if not path.exists():
@@ -152,6 +173,14 @@ class PatcherApp:
     def write_json(self, path: Path, payload: dict) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    def log_error(self, event: str, message: str, **context: object) -> None:
+        append_error_log(event, message, **context)
+
+    def log_exception(self, event: str, exc: Exception, **context: object) -> None:
+        context["exception_type"] = type(exc).__name__
+        context["traceback"] = traceback.format_exc()
+        self.log_error(event, str(exc), **context)
 
     def tr(self, key: str, **kwargs: object) -> str:
         language_map = self.translations.get(self.lang) or self.translations.get(DEFAULT_LANGUAGE, {})
@@ -306,10 +335,12 @@ class PatcherApp:
         self.widgets["update_btn"].grid(row=0, column=1, sticky="e", padx=(0, 12))
         self.widgets["info_btn"] = ttk.Button(header, command=self.open_info_window, width=8)
         self.widgets["info_btn"].grid(row=0, column=2, sticky="e", padx=(0, 12))
+        self.widgets["refresh_btn"] = ttk.Button(header, command=self.manual_refresh_patch_statuses)
+        self.widgets["refresh_btn"].grid(row=0, column=3, sticky="e", padx=(0, 12))
         self.widgets["lang_label"] = ttk.Label(header, text=self.tr("lang"))
-        self.widgets["lang_label"].grid(row=0, column=3, sticky="e", padx=(0, 8))
+        self.widgets["lang_label"].grid(row=0, column=4, sticky="e", padx=(0, 8))
         combo = ttk.Combobox(header, state="readonly", values=[label for label, _ in LANGUAGES], textvariable=self.lang_var, width=12)
-        combo.grid(row=0, column=4, sticky="e")
+        combo.grid(row=0, column=5, sticky="e")
         combo.bind("<<ComboboxSelected>>", self.on_language_changed)
 
         path_box = ttk.LabelFrame(frame, text=self.tr("target"))
@@ -572,6 +603,7 @@ class PatcherApp:
         self.widgets["version_label"].configure(text=self.tr("version_label", version=self.current_version))
         self.widgets["update_btn"].configure(text=self.tr("check_updates"))
         self.widgets["info_btn"].configure(text=self.tr("info_button"))
+        self.widgets["refresh_btn"].configure(text=self.tr("refresh_list"))
         self.widgets["lang_label"].configure(text=self.tr("lang"))
         self.widgets["path_box"].configure(text=self.tr("target"))
         self.widgets["choose_btn"].configure(text=self.tr("choose"))
@@ -680,6 +712,12 @@ class PatcherApp:
         if path:
             self.set_target_path(path)
 
+    def manual_refresh_patch_statuses(self) -> None:
+        if self.is_busy:
+            return
+        self.refresh_patch_statuses()
+        self.status_var.set(self.tr("ready"))
+
     def set_target_path(self, path: str) -> None:
         self.target_path_var.set(path)
         self.settings["last_target_path"] = path
@@ -718,7 +756,18 @@ class PatcherApp:
         self.is_busy = True
         self.progress_var.set(0)
         self.status_var.set(self.tr("updates_checking"))
-        threading.Thread(target=self.check_for_updates_worker, daemon=True).start()
+        threading.Thread(target=self.check_for_updates_worker, args=(False,), daemon=True).start()
+
+    def start_startup_update_check(self) -> None:
+        if not self.update_repo:
+            return
+        if self.is_busy:
+            self.root.after(1000, self.start_startup_update_check)
+            return
+        self.is_busy = True
+        self.progress_var.set(0)
+        self.status_var.set(self.tr("updates_checking"))
+        threading.Thread(target=self.check_for_updates_worker, args=(True,), daemon=True).start()
 
     def start_patch_install(self) -> None:
         if self.is_busy:
@@ -817,7 +866,7 @@ class PatcherApp:
                         self.queue.put(("status", self.tr("extract_archive", i=index, n=total, name=patch_label)))
                         self.set_patch_stage_progress(patch_start, patch_end, 0.82)
                         try:
-                            self.extract_archive_to_directory(archive_path, stage_dir)
+                            self.extract_archive_to_directory(archive_path, stage_dir, output_name=archive_name)
                         except Exception:
                             if not used_cached_archive:
                                 raise
@@ -839,7 +888,7 @@ class PatcherApp:
                                 )) if total_size else None,
                             )
                             self.queue.put(("status", self.tr("extract_archive", i=index, n=total, name=patch_label)))
-                            self.extract_archive_to_directory(archive_path, stage_dir)
+                            self.extract_archive_to_directory(archive_path, stage_dir, output_name=archive_name)
                         self.queue.put(("status", self.tr("apply_status", i=index, n=total, name=patch_label)))
                         self.set_patch_stage_progress(patch_start, patch_end, 0.92)
                         record = self.apply_staged_patch(patch, stage_dir, target_root)
@@ -849,14 +898,16 @@ class PatcherApp:
                 self.queue.put(("progress", 100))
                 self.queue.put(("done", self.tr("done")))
         except Exception as exc:
+            self.log_exception("patch_install", exc)
             self.queue.put(("error", str(exc)))
 
-    def check_for_updates_worker(self) -> None:
+    def check_for_updates_worker(self, silent: bool) -> None:
         try:
             release = self.fetch_latest_release()
-            self.queue.put(("update_check_result", release))
+            self.queue.put(("update_check_result", {"release": release, "silent": silent}))
         except Exception as exc:
-            self.queue.put(("update_error", str(exc)))
+            self.log_exception("update_check", exc, silent=silent, repo=self.update_repo)
+            self.queue.put(("update_error", {"message": str(exc), "silent": silent}))
 
     def download_update_worker(self, release: dict) -> None:
         try:
@@ -879,7 +930,8 @@ class PatcherApp:
             )
             self.queue.put(("update_ready", {"release": release, "path": str(destination)}))
         except Exception as exc:
-            self.queue.put(("update_error", str(exc)))
+            self.log_exception("update_download", exc, silent=False, repo=self.update_repo)
+            self.queue.put(("update_error", {"message": str(exc), "silent": False}))
 
     def uninstall_patches_worker(self, selected: list[PatchDefinition], target_root: Path) -> None:
         try:
@@ -891,6 +943,7 @@ class PatcherApp:
             self.queue.put(("progress", 100))
             self.queue.put(("done", self.tr("uninstall_done")))
         except Exception as exc:
+            self.log_exception("patch_uninstall", exc)
             self.queue.put(("error", str(exc)))
 
     def process_queue(self) -> None:
@@ -923,13 +976,15 @@ class PatcherApp:
                     self.refresh_patch_statuses()
                     messagebox.showinfo(self.tr("done_t"), payload)
                 elif kind == "update_check_result":
-                    release = payload
+                    release = payload["release"]
+                    silent = payload.get("silent", False)
                     latest_version = self.normalize_version_text(release.get("tag_name", ""))
                     if not self.is_newer_version(latest_version, self.current_version):
                         self.is_busy = False
                         self.progress_var.set(0)
                         self.status_var.set(self.tr("ready"))
-                        messagebox.showinfo(self.tr("updates_t"), self.tr("updates_current", version=self.current_version))
+                        if not silent:
+                            messagebox.showinfo(self.tr("updates_t"), self.tr("updates_current", version=self.current_version))
                     else:
                         message = self.tr("updates_available", current=self.current_version, latest=latest_version)
                         if messagebox.askyesno(self.tr("updates_t"), message):
@@ -961,7 +1016,8 @@ class PatcherApp:
                     self.is_busy = False
                     self.progress_var.set(0)
                     self.status_var.set(self.tr("ready"))
-                    messagebox.showerror(self.tr("updates_t"), payload)
+                    if not payload.get("silent", False):
+                        messagebox.showerror(self.tr("updates_t"), payload["message"])
                 elif kind == "error":
                     self.is_busy = False
                     self.status_var.set(self.tr("err"))
@@ -998,12 +1054,30 @@ class PatcherApp:
     def pick_working_source(self, patch: PatchDefinition) -> PatchSource | None:
         for source in patch.sources:
             self.queue.put(("status", self.tr("check_source", name=self.patch_name(patch))))
+            source_host = urlparse(source.url).hostname or "unknown"
             try:
                 resolved_url = self.resolve_download_url(source.url)
-            except Exception:
+            except Exception as exc:
+                self.log_exception(
+                    "source_resolve",
+                    exc,
+                    patch_id=patch.id,
+                    patch_name=self.patch_name(patch),
+                    source_label=source.label,
+                    source_host=source_host,
+                )
                 continue
+            resolved_host = urlparse(resolved_url).hostname or source_host
             if self.check_url_available(resolved_url):
                 return PatchSource(source.label, resolved_url)
+            self.log_error(
+                "source_unavailable",
+                "No reachable download source during availability check.",
+                patch_id=patch.id,
+                patch_name=self.patch_name(patch),
+                source_label=source.label,
+                source_host=resolved_host,
+            )
         return None
 
     def resolve_download_url(self, url: str) -> str:
@@ -1029,7 +1103,7 @@ class PatcherApp:
             match = re.search(pattern, html, flags=re.IGNORECASE)
             if match:
                 return unescape(match.group(1))
-        raise RuntimeError(f"Could not resolve MediaFire download link from {url}")
+        raise RuntimeError("Could not resolve MediaFire download link.")
 
     def check_url_available(self, url: str) -> bool:
         try:
@@ -1136,8 +1210,7 @@ class PatcherApp:
             'del "%~f0" >nul 2>&1',
         ]
         script_path.write_text("\r\n".join(script_lines) + "\r\n", encoding="utf-8")
-        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-        subprocess.Popen(["cmd", "/c", str(script_path)], creationflags=creationflags)
+        subprocess.Popen(["cmd", "/c", str(script_path)], **self.hidden_subprocess_kwargs())
         self.root.destroy()
         os._exit(0)
 
@@ -1160,7 +1233,7 @@ class PatcherApp:
             if progress_callback:
                 progress_callback(1.0)
 
-    def extract_archive_to_directory(self, archive_path: Path, destination: Path) -> None:
+    def extract_archive_to_directory(self, archive_path: Path, destination: Path, output_name: str | None = None) -> None:
         suffix = archive_path.suffix.lower()
         if suffix == ".zip":
             with zipfile.ZipFile(archive_path, "r") as archive:
@@ -1169,16 +1242,22 @@ class PatcherApp:
         if suffix == ".rar":
             if not self.install_tool_path:
                 raise RuntimeError(self.tr("rar_requires_tool"))
-            result = subprocess.run(self.build_extractor_command(archive_path, destination), check=False, capture_output=True, text=True)
+            result = subprocess.run(
+                self.build_extractor_command(archive_path, destination),
+                check=False,
+                capture_output=True,
+                text=True,
+                **self.hidden_subprocess_kwargs(),
+            )
             if result.returncode != 0:
                 details = result.stderr.strip() or result.stdout.strip() or self.tr("unknown")
                 raise RuntimeError(self.tr("extract_fail", details=details))
             return
-        self.stage_single_file(archive_path, destination)
+        self.stage_single_file(archive_path, destination, output_name=output_name)
 
-    def stage_single_file(self, source_file: Path, destination: Path) -> None:
+    def stage_single_file(self, source_file: Path, destination: Path, output_name: str | None = None) -> None:
         destination.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source_file, destination / source_file.name)
+        shutil.copy2(source_file, destination / (output_name or source_file.name))
         return
 
     def apply_large_address_aware_patch(self, patch: PatchDefinition, target_root: Path) -> dict:
@@ -1231,6 +1310,7 @@ class PatcherApp:
                 relative_inside = source_file.relative_to(stage_dir)
                 destination = target_base / relative_inside
                 destination.parent.mkdir(parents=True, exist_ok=True)
+                self.prune_hashed_target_artifacts(destination.parent, destination.name)
                 relative_to_root = str(destination.relative_to(target_root)).replace("/", "\\")
                 backup_path = old_backups.get(relative_to_root)
                 if destination.exists() and not backup_path:
@@ -1271,6 +1351,15 @@ class PatcherApp:
             except OSError:
                 break
             current = current.parent
+
+    def prune_hashed_target_artifacts(self, directory: Path, filename: str) -> None:
+        pattern = re.compile(rf"^[0-9a-f]{{16}}-{re.escape(filename)}$", re.IGNORECASE)
+        for candidate in directory.glob(f"*-{filename}"):
+            if candidate.is_file() and pattern.match(candidate.name):
+                try:
+                    candidate.unlink()
+                except OSError:
+                    pass
 
     def hash_file(self, path: Path) -> str:
         hasher = hashlib.sha256()
@@ -1365,6 +1454,21 @@ class PatcherApp:
             return [self.install_tool_path, "x", "-ibck", "-o+", str(archive_path), str(destination)]
         return [self.install_tool_path, "x", "-o+", str(archive_path), str(destination)]
 
+    def hidden_subprocess_kwargs(self) -> dict:
+        kwargs: dict = {}
+        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        if creationflags:
+            kwargs["creationflags"] = creationflags
+        startupinfo_cls = getattr(subprocess, "STARTUPINFO", None)
+        startupf_use_showwindow = getattr(subprocess, "STARTF_USESHOWWINDOW", 0)
+        sw_hide = getattr(subprocess, "SW_HIDE", 0)
+        if startupinfo_cls and startupf_use_showwindow:
+            startupinfo = startupinfo_cls()
+            startupinfo.dwFlags |= startupf_use_showwindow
+            startupinfo.wShowWindow = sw_hide
+            kwargs["startupinfo"] = startupinfo
+        return kwargs
+
     def find_extractor(self) -> str | None:
         tool_roots = [APP_DIR / "tools"]
         if RESOURCE_DIR != APP_DIR:
@@ -1391,6 +1495,7 @@ def main() -> None:
     try:
         app = PatcherApp(root)
     except Exception as exc:
+        append_error_log("startup", str(exc), exception_type=type(exc).__name__, traceback=traceback.format_exc())
         messagebox.showerror("Startup Error", str(exc))
         root.destroy()
         return
