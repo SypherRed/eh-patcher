@@ -85,7 +85,15 @@
     "search_at": "Searching in {root} - current location: {current}",
     "updates_asset_missing": "Automatic update could not continue because the release asset \"{asset}\" was not found in release {release}.",
     "updates_auto_only": "Automatic update is only available in the published Windows executable.",
-    "using_cached_patch": "[{i}/{n}] Using saved patch '{name}' ..."
+    "using_cached_patch": "[{i}/{n}] Using saved patch '{name}' ...",
+    "laa_manual_t": "Choose WoW executable",
+    "laa_manual_m": "Patch '{name}' could not identify the executable automatically.\n\nReason: {reason}\n\nPlease select the .exe file you use to start WoW.",
+    "laa_choose_title": "Choose the executable used to start WoW",
+    "laa_exe_files": "Windows executables",
+    "laa_all_files": "All files",
+    "exe_outside_target": "The selected executable '{path}' must be located inside the target folder '{root}'.",
+    "laa_cancelled": "The 4 GB patch was not applied to: {names}. No executable was selected.",
+    "patches_partial_failure": "Some patches could not be applied:\n\n{failures}"
   },
   "de": {
     "lang": "Sprache",
@@ -173,7 +181,15 @@
     "search_at": "Suche in {root} - aktueller Ort: {current}",
     "updates_asset_missing": "Das automatische Update konnte nicht fortgesetzt werden, weil das Release-Asset \"{asset}\" in Release {release} nicht gefunden wurde.",
     "updates_auto_only": "Das automatische Update ist nur in der ver\u00c3\u00b6ffentlichten Windows-EXE verf\u00c3\u00bcgbar.",
-    "using_cached_patch": "[{i}/{n}] Verwende gespeicherten Patch '{name}' ..."
+    "using_cached_patch": "[{i}/{n}] Verwende gespeicherten Patch '{name}' ...",
+    "laa_manual_t": "WoW-EXE auswählen",
+    "laa_manual_m": "Patch '{name}' konnte die EXE nicht automatisch erkennen.\n\nGrund: {reason}\n\nBitte wähle gezielt die .exe-Datei aus, über die du WoW startest.",
+    "laa_choose_title": "EXE auswählen, über die WoW gestartet wird",
+    "laa_exe_files": "Windows-Programme",
+    "laa_all_files": "Alle Dateien",
+    "exe_outside_target": "Die ausgewählte EXE '{path}' muss sich innerhalb des Zielordners '{root}' befinden.",
+    "laa_cancelled": "Der 4-GB-Patch wurde nicht angewendet auf: {names}. Es wurde keine EXE ausgewählt.",
+    "patches_partial_failure": "Einige Patches konnten nicht angewendet werden:\n\n{failures}"
   },
   "es": {
     "lang": "Idioma",
@@ -261,7 +277,15 @@
     "search_at": "Buscando en {root} - ubicaci\u00c3\u00b3n actual: {current}",
     "updates_asset_missing": "La actualizaci\u00c3\u00b3n autom\u00c3\u00a1tica no pudo continuar porque el recurso de la versi\u00c3\u00b3n \"{asset}\" no se encontr\u00c3\u00b3 en la versi\u00c3\u00b3n {release}.",
     "updates_auto_only": "La actualizaci\u00c3\u00b3n autom\u00c3\u00a1tica solo est\u00c3\u00a1 disponible en el ejecutable de Windows publicado.",
-    "using_cached_patch": "[{i}/{n}] Usando el parche guardado '{name}' ..."
+    "using_cached_patch": "[{i}/{n}] Usando el parche guardado '{name}' ...",
+    "laa_manual_t": "Seleccionar ejecutable de WoW",
+    "laa_manual_m": "El parche '{name}' no pudo identificar automáticamente el ejecutable.\n\nMotivo: {reason}\n\nSelecciona el archivo .exe que utilizas para iniciar WoW.",
+    "laa_choose_title": "Selecciona el ejecutable utilizado para iniciar WoW",
+    "laa_exe_files": "Ejecutables de Windows",
+    "laa_all_files": "Todos los archivos",
+    "exe_outside_target": "El ejecutable seleccionado '{path}' debe estar dentro de la carpeta de destino '{root}'.",
+    "laa_cancelled": "El parche de 4 GB no se aplicó a: {names}. No se seleccionó ningún ejecutable.",
+    "patches_partial_failure": "No se pudieron aplicar algunos parches:\n\n{failures}"
   },
   "it": {
     "lang": "Lingua",
@@ -349,6 +373,14 @@
     "search_at": "Ricerca in {root} - posizione attuale: {current}",
     "updates_asset_missing": "L'aggiornamento automatico non ha potuto continuare perch? la risorsa della release \"{asset}\" non ? stata trovata nella release {release}.",
     "updates_auto_only": "L'aggiornamento automatico ? disponibile solo nell'eseguibile Windows pubblicato.",
-    "using_cached_patch": "[{i}/{n}] Uso della patch salvata '{name}' ..."
+    "using_cached_patch": "[{i}/{n}] Uso della patch salvata '{name}' ...",
+    "laa_manual_t": "Seleziona l'eseguibile di WoW",
+    "laa_manual_m": "La patch '{name}' non ha potuto identificare automaticamente l'eseguibile.\n\nMotivo: {reason}\n\nSeleziona il file .exe che usi per avviare WoW.",
+    "laa_choose_title": "Seleziona l'eseguibile usato per avviare WoW",
+    "laa_exe_files": "Eseguibili Windows",
+    "laa_all_files": "Tutti i file",
+    "exe_outside_target": "L'eseguibile selezionato '{path}' deve trovarsi nella cartella di destinazione '{root}'.",
+    "laa_cancelled": "La patch da 4 GB non è stata applicata a: {names}. Non è stato selezionato alcun eseguibile.",
+    "patches_partial_failure": "Non è stato possibile applicare alcune patch:\n\n{failures}"
   }
 }
