@@ -942,6 +942,7 @@ class PatcherApp:
                 total = len(selected)
                 deferred: list[PatchDefinition] = []
                 failures: list[str] = []
+                manual_laa: list[dict] = []
                 for index, patch in enumerate(selected, start=1):
                     patch_start = ((index - 1) / total) * 100
                     patch_end = (index / total) * 100
@@ -949,7 +950,18 @@ class PatcherApp:
                     self.queue.put(("progress", patch_start))
                     if patch.patch_type in {"large_address_aware", "laa"}:
                         self.queue.put(("status", self.tr("apply_status", i=index, n=total, name=patch_label)))
-                        record = self.apply_large_address_aware_patch(patch, target_root)
+                        try:
+                            record = self.apply_large_address_aware_patch(patch, target_root)
+                        except RuntimeError as exc:
+                            manual_laa.append({"patch": patch, "reason": str(exc)})
+                            self.log_exception(
+                                "large_address_aware_auto_target",
+                                exc,
+                                patch_id=patch.id,
+                                patch_name=patch_label,
+                            )
+                            self.queue.put(("progress", patch_end))
+                            continue
                         self.queue.put(("progress", patch_end))
                     else:
                         try:
@@ -996,11 +1008,17 @@ class PatcherApp:
                             failures.append(f"{patch_label}: {exc}")
                             self.log_exception("patch_install_retry", exc, patch_id=patch.id, patch_name=patch_label)
 
-                if failures:
-                    raise RuntimeError("Some patches could not be applied:\n\n" + "\n".join(failures))
-
                 self.queue.put(("progress", 100))
-                self.queue.put(("done", self.tr("done")))
+                if manual_laa:
+                    self.queue.put(("laa_manual_required", {
+                        "patches": manual_laa,
+                        "target_root": str(target_root),
+                        "failures": failures,
+                    }))
+                elif failures:
+                    raise RuntimeError("Some patches could not be applied:\n\n" + "\n".join(failures))
+                else:
+                    self.queue.put(("done", self.tr("done")))
         except Exception as exc:
             self.log_exception("patch_install", exc)
             self.queue.put(("error", str(exc)))
@@ -1079,6 +1097,8 @@ class PatcherApp:
                     self.status_var.set(payload)
                     self.refresh_patch_statuses()
                     messagebox.showinfo(self.tr("done_t"), payload)
+                elif kind == "laa_manual_required":
+                    self.finish_manual_large_address_aware(payload)
                 elif kind == "update_check_result":
                     release = payload["release"]
                     silent = payload.get("silent", False)
@@ -1130,6 +1150,62 @@ class PatcherApp:
         except Empty:
             pass
         self.root.after(150, self.process_queue)
+
+    def finish_manual_large_address_aware(self, payload: dict) -> None:
+        target_root = Path(payload["target_root"])
+        failures = list(payload.get("failures", []))
+        cancelled: list[str] = []
+
+        for item in payload["patches"]:
+            patch = item["patch"]
+            patch_label = self.patch_name(patch)
+            messagebox.showwarning(
+                self.tr("laa_manual_t"),
+                self.tr("laa_manual_m", name=patch_label, reason=item["reason"]),
+            )
+            while True:
+                selected_path = filedialog.askopenfilename(
+                    title=self.tr("laa_choose_title"),
+                    initialdir=str(target_root),
+                    filetypes=[
+                        (self.tr("laa_exe_files"), "*.exe"),
+                        (self.tr("laa_all_files"), "*.*"),
+                    ],
+                )
+                if not selected_path:
+                    cancelled.append(patch_label)
+                    break
+                try:
+                    record = self.apply_large_address_aware_patch(
+                        patch,
+                        target_root,
+                        executable_path=Path(selected_path),
+                    )
+                    self.upsert_install_record(record)
+                    break
+                except Exception as exc:
+                    self.log_exception(
+                        "large_address_aware_manual_target",
+                        exc,
+                        patch_id=patch.id,
+                        patch_name=patch_label,
+                        selected_file=Path(selected_path).name,
+                    )
+                    messagebox.showerror(self.tr("err_t"), str(exc))
+
+        self.is_busy = False
+        self.refresh_patch_statuses()
+        if cancelled:
+            failures.append(self.tr("laa_cancelled", names=", ".join(cancelled)))
+        if failures:
+            self.status_var.set(self.tr("err"))
+            messagebox.showerror(
+                self.tr("err_t"),
+                self.tr("patches_partial_failure", failures="\n".join(failures)),
+            )
+        else:
+            self.status_var.set(self.tr("done"))
+            messagebox.showinfo(self.tr("done_t"), self.tr("done"))
 
     def get_search_roots(self) -> list[Path]:
         return self.list_available_drives()
@@ -1460,14 +1536,16 @@ class PatcherApp:
             "setlocal",
             f'set "NEW_FILE={download_path}"',
             f'set "TARGET_FILE={current_executable}"',
+            f'set "TARGET_DIR={current_executable.parent}"',
             ":retry",
             'copy /Y "%NEW_FILE%" "%TARGET_FILE%" >nul',
             "if errorlevel 1 (",
             "  timeout /t 2 /nobreak >nul",
             "  goto retry",
             ")",
+            "timeout /t 2 /nobreak >nul",
             'del "%NEW_FILE%" >nul 2>&1',
-            'start "" "%TARGET_FILE%"',
+            'start "" /D "%TARGET_DIR%" "%TARGET_FILE%"',
             'del "%~f0" >nul 2>&1',
         ]
         script_path.write_text("\r\n".join(script_lines) + "\r\n", encoding="utf-8")
@@ -1521,20 +1599,32 @@ class PatcherApp:
         shutil.copy2(source_file, destination / (output_name or source_file.name))
         return
 
-    def apply_large_address_aware_patch(self, patch: PatchDefinition, target_root: Path) -> dict:
+    def apply_large_address_aware_patch(
+        self,
+        patch: PatchDefinition,
+        target_root: Path,
+        executable_path: Path | None = None,
+    ) -> dict:
         if not patch.target_executable:
             raise RuntimeError(self.tr("cfg_exe", name=self.patch_name(patch)))
-        executable_path = target_root / Path(patch.target_executable)
+        executable_path = executable_path or target_root / Path(patch.target_executable)
         if not executable_path.exists():
-            raise RuntimeError(self.tr("exe_missing", name=self.patch_name(patch), path=patch.target_executable))
+            raise RuntimeError(self.tr("exe_missing", name=self.patch_name(patch), path=executable_path))
         if not executable_path.is_file():
-            raise RuntimeError(self.tr("exe_invalid", path=patch.target_executable))
+            raise RuntimeError(self.tr("exe_invalid", path=executable_path))
+
+        target_root = target_root.resolve()
+        executable_path = executable_path.resolve()
+        try:
+            relative_path = executable_path.relative_to(target_root)
+        except ValueError as exc:
+            raise RuntimeError(self.tr("exe_outside_target", path=executable_path, root=target_root)) from exc
 
         old_record = self.find_install_record(patch.id, target_root)
         old_backups = {entry["relative_path"]: entry.get("backup_path") for entry in old_record.get("files", [])} if old_record else {}
         install_id = self.make_install_id(patch.id)
         backup_root = PATCH_BACKUPS_DIR / install_id
-        relative_to_root = str(executable_path.relative_to(target_root)).replace("/", "\\")
+        relative_to_root = str(relative_path).replace("/", "\\")
         backup_path = old_backups.get(relative_to_root)
         if not backup_path:
             backup_file = backup_root / relative_to_root
@@ -1694,12 +1784,25 @@ class PatcherApp:
         patch = next((candidate for candidate, _ in self.patch_vars if candidate.id == patch_id), None)
         if patch and patch.patch_type in {"large_address_aware", "laa"} and patch.target_executable:
             executable_path = target_root / Path(patch.target_executable)
-            if not executable_path.exists() or not executable_path.is_file():
+            if executable_path.exists() and executable_path.is_file():
+                try:
+                    if self.is_large_address_aware(executable_path):
+                        return True
+                except RuntimeError:
+                    pass
+            record = self.find_install_record(patch_id, target_root)
+            if not record:
                 return False
-            try:
-                return self.is_large_address_aware(executable_path)
-            except RuntimeError:
-                return False
+            for entry in record.get("files", []):
+                recorded_executable = target_root / Path(entry["relative_path"])
+                if not recorded_executable.exists() or not recorded_executable.is_file():
+                    continue
+                try:
+                    if self.is_large_address_aware(recorded_executable):
+                        return True
+                except RuntimeError:
+                    continue
+            return False
         if patch and patch.expected_files:
             return all((target_root / Path(relative_path)).exists() for relative_path in patch.expected_files)
         record = self.find_install_record(patch_id, target_root)
