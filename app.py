@@ -1545,6 +1545,7 @@ class PatcherApp:
             ")",
             "timeout /t 2 /nobreak >nul",
             'del "%NEW_FILE%" >nul 2>&1',
+            'set "PYINSTALLER_RESET_ENVIRONMENT=1"',
             'start "" /D "%TARGET_DIR%" "%TARGET_FILE%"',
             'del "%~f0" >nul 2>&1',
         ]
